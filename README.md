@@ -7,7 +7,7 @@ Personal Claude Code mods.
 A one-row bar under the prompt to switch model, effort and advisor model in one press.
 
 ```
-🧠 fable [opus] sonnet haiku | low [medium] high xhigh max | advisor [off] fable opus sonnet
+🧠 [auto] fable opus sonnet haiku | low [medium] high xhigh max | advisor [off] fable opus sonnet
 ```
 
 Load it in every session by adding to `~/.claude/settings.json`:

@@ -4,6 +4,7 @@ import type { Register } from 'claude-code'
 const model = atom({ plugin: 'model-switch', key: 'model' } as const, '?')
 const effort = atom({ plugin: 'model-switch', key: 'effort' } as const, '?')
 const advisor = atom({ plugin: 'model-switch', key: 'advisor' } as const, 'off')
+const auto = atom({ plugin: 'model-switch', key: 'auto' } as const, 'off')
 
 const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] // most → least powerful
 const ADVISORS = ['off', 'fable', 'opus', 'sonnet'] // /advisor validates; haiku as advisor makes no sense
@@ -38,12 +39,17 @@ export const register: Register = on => {
     const r = await next(e)
     const m = await $.session.model()
     await update($, model, () => m)
+    const a = e.args.trim()
+    if (a) await update($, auto, () => (a === 'default' ? 'on' : 'off'))
     return r
   }).catch(($, e, next) => (next.called ? { text: '' } : next(e)))
   on('command.run', { command: 'effort' }, async ($, e, next) => {
     const r = await next(e)
     const lvl = e.args.trim()
-    if (EFFORTS.includes(lvl)) await update($, effort, () => lvl)
+    if (EFFORTS.includes(lvl)) {
+      await update($, effort, () => lvl)
+      await update($, auto, () => 'off')
+    }
     return r
   })
 
@@ -61,9 +67,16 @@ export const register: Register = on => {
     const m = await read($, model)
     const lvl = await read($, effort)
     const adv = await read($, advisor)
+    const isAuto = (await read($, auto)) === 'on' // auto: model + effort groups go gray
     const advOff = adv === 'off' // advisor off: the whole group goes gray
 
+    const setAuto = () => {
+      void update($, auto, () => 'on')
+      void $.command.run({ command: 'model', args: 'default' })
+      void $.command.run({ command: 'effort', args: 'auto' })
+    }
     const setModel = (name: string) => {
+      void update($, auto, () => 'off')
       void update($, model, () => name)
       void $.command.run({ command: 'model', args: name })
     }
@@ -72,6 +85,7 @@ export const register: Register = on => {
       void $.command.run({ command: 'advisor', args: name })
     }
     const setEffort = (name: string) => {
+      void update($, auto, () => 'off')
       void update($, effort, () => name)
       void $.command.run({ command: 'effort', args: name })
     }
@@ -81,16 +95,19 @@ export const register: Register = on => {
         {hint}
         <Box>
           <Text>🧠 </Text>
+          {isAuto
+            ? <Text bold color="#4d94f0"> [auto] </Text>
+            : <Button key="m-auto" plain onPress={setAuto}><Text color="#3f68a8"> auto </Text></Button>}
           {MODELS.map(n =>
-            m.includes(n)
+            !isAuto && m.includes(n) // auto: nothing selected, all gray
               ? <Text key={`m-${n}`} bold color="#4d94f0"> [{n}] </Text>
-              : <Button key={`m-${n}`} plain onPress={() => setModel(n)}><Text color="#3f68a8"> {n} </Text></Button>,
+              : <Button key={`m-${n}`} plain onPress={() => setModel(n)}><Text color={isAuto ? 'gray' : '#3f68a8'} dimColor={isAuto}> {n} </Text></Button>,
           )}
           <Text dimColor> | </Text>
           {EFFORTS.map(n =>
-            lvl === n
+            !isAuto && lvl === n
               ? <Text key={`e-${n}`} bold color={EFFORT_COLOR[n]}> [{n}] </Text>
-              : <Button key={`e-${n}`} plain onPress={() => setEffort(n)}><Text color={EFFORT_DIM[n]}> {n} </Text></Button>,
+              : <Button key={`e-${n}`} plain onPress={() => setEffort(n)}><Text color={isAuto ? 'gray' : EFFORT_DIM[n]} dimColor={isAuto}> {n} </Text></Button>,
           )}
           <Text dimColor> | advisor </Text>
           {ADVISORS.map(n =>
