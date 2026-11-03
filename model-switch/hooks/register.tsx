@@ -104,12 +104,15 @@ export const register: Register = on => {
               : <Button key={`m-${n}`} plain onPress={() => setModel(n)}><Text color={isAuto ? 'gray' : '#3f68a8'} dimColor={isAuto}> {n} </Text></Button>,
           )}
           <Text dimColor> | </Text>
+          {/* color emoji ignore ANSI color → swap to a monochrome glyph when the group is grayed */}
+          {isAuto ? <Text color="gray" dimColor>↯ </Text> : <Text>⚡ </Text>}
           {EFFORTS.map(n =>
             !isAuto && lvl === n
               ? <Text key={`e-${n}`} bold color={EFFORT_COLOR[n]}> [{n}] </Text>
               : <Button key={`e-${n}`} plain onPress={() => setEffort(n)}><Text color={isAuto ? 'gray' : EFFORT_DIM[n]} dimColor={isAuto}> {n} </Text></Button>,
           )}
-          <Text dimColor> | advisor </Text>
+          <Text dimColor> | </Text>
+          {advOff ? <Text color="gray" dimColor>◉ </Text> : <Text>👁️ </Text>}
           {ADVISORS.map(n =>
             adv.includes(n)
               ? <Text key={`a-${n}`} bold color={advOff ? 'gray' : '#b76de0'}> [{n}] </Text>
