@@ -5,10 +5,14 @@ const model = atom({ plugin: 'model-switch', key: 'model' } as const, '?')
 const effort = atom({ plugin: 'model-switch', key: 'effort' } as const, '?')
 const advisor = atom({ plugin: 'model-switch', key: 'advisor' } as const, 'off')
 const auto = atom({ plugin: 'model-switch', key: 'auto' } as const, 'off')
+// Session-only picks from the bar ('' = none → the default set by /model, /effort applies).
+const pickModel = atom({ plugin: 'model-switch', key: 'pickModel' } as const, '')
+const pickEffort = atom({ plugin: 'model-switch', key: 'pickEffort' } as const, '')
 
 const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] // most → least powerful
 const ADVISORS = ['off', 'fable', 'opus', 'sonnet'] // /advisor validates; haiku as advisor makes no sense
-const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+const EFFORTS_T = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+const EFFORTS: readonly string[] = EFFORTS_T
 const EFFORT_COLOR: Record<string, string> = { low: '#22c55e', medium: '#a3e635', high: '#facc15', xhigh: '#f97316', max: '#ef4444' }
 const EFFORT_DIM: Record<string, string> = { low: '#2f6b45', medium: '#5e7a35', high: '#857232', xhigh: '#8a5530', max: '#8a3b3b' }
 
@@ -25,18 +29,24 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Truth source: what the engine actually sends on each main-loop request.
+  // Defaults come from what the engine resolves; the bar's session picks then rewrite the main-loop request.
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId === undefined) {
-      await update($, model, () => e.model)
-      await update($, effort, () => (e.effort === undefined ? 'n/a' : String(e.effort)))
-    }
-    return yield* next(e)
+    if (e.agentId !== undefined) return yield* next(e)
+    await update($, model, () => e.model)
+    await update($, effort, () => (e.effort === undefined ? 'n/a' : String(e.effort)))
+    const pm = await read($, pickModel)
+    const pe = await read($, pickEffort)
+    return yield* next({
+      ...e,
+      ...(pm && { model: pm }),
+      ...(pe && { effort: pe as (typeof EFFORTS_T)[number] }),
+    })
   })
 
-  // Catch /model and /effort typed by hand, not only the bar's buttons.
+  // /model and /effort typed by hand set the default and drop the session pick (buttons no longer run them).
   on('command.run', { command: 'model' }, async ($, e, next) => {
     const r = await next(e)
+    await update($, pickModel, () => '')
     const m = await $.session.model()
     await update($, model, () => m)
     const a = e.args.trim()
@@ -46,6 +56,7 @@ export const register: Register = on => {
   on('command.run', { command: 'effort' }, async ($, e, next) => {
     const r = await next(e)
     const lvl = e.args.trim()
+    if (lvl) await update($, pickEffort, () => '')
     if (EFFORTS.includes(lvl)) {
       await update($, effort, () => lvl)
       await update($, auto, () => 'off')
@@ -64,31 +75,28 @@ export const register: Register = on => {
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     const hint = await next(e)
     const { Box, Button, Text } = $.ui.resolve(e)
-    const m = await read($, model)
-    const lvl = await read($, effort)
+    const pm = await read($, pickModel)
+    const pe = await read($, pickEffort)
+    const m = pm || (await read($, model))
+    const lvl = pe || (await read($, effort))
     const adv = await read($, advisor)
-    const isAuto = (await read($, auto)) === 'on' // auto: model + effort groups go gray
+    const autoDefault = (await read($, auto)) === 'on'
+    const mAuto = autoDefault && !pm // a group goes gray while it follows the auto default
+    const eAuto = autoDefault && !pe
+    const isAuto = mAuto && eAuto
     const advOff = adv === 'off' // advisor off: the whole group goes gray
 
+    // code simplification: "auto" = drop the session picks → back to the defaults; true auto only if the default is auto
     const setAuto = () => {
-      void update($, auto, () => 'on')
-      void $.command.run({ command: 'model', args: 'default' })
-      void $.command.run({ command: 'effort', args: 'auto' })
+      void update($, pickModel, () => '')
+      void update($, pickEffort, () => '')
     }
-    const setModel = (name: string) => {
-      void update($, auto, () => 'off')
-      void update($, model, () => name)
-      void $.command.run({ command: 'model', args: name })
-    }
+    const setModel = (name: string) => void update($, pickModel, () => name)
     const setAdvisor = (name: string) => {
       void update($, advisor, () => name)
       void $.command.run({ command: 'advisor', args: name })
     }
-    const setEffort = (name: string) => {
-      void update($, auto, () => 'off')
-      void update($, effort, () => name)
-      void $.command.run({ command: 'effort', args: name })
-    }
+    const setEffort = (name: string) => void update($, pickEffort, () => name)
 
     return (
       <Box flexDirection="column">
@@ -99,17 +107,17 @@ export const register: Register = on => {
             ? <Text bold color="#4d94f0"> [auto] </Text>
             : <Button key="m-auto" plain onPress={setAuto}><Text color="#3f68a8"> auto </Text></Button>}
           {MODELS.map(n =>
-            !isAuto && m.includes(n) // auto: nothing selected, all gray
+            !mAuto && m.includes(n) // auto: nothing selected, all gray
               ? <Text key={`m-${n}`} bold color="#4d94f0"> [{n}] </Text>
-              : <Button key={`m-${n}`} plain onPress={() => setModel(n)}><Text color={isAuto ? 'gray' : '#3f68a8'} dimColor={isAuto}> {n} </Text></Button>,
+              : <Button key={`m-${n}`} plain onPress={() => setModel(n)}><Text color={mAuto ? 'gray' : '#3f68a8'} dimColor={mAuto}> {n} </Text></Button>,
           )}
           <Text dimColor> | </Text>
           {/* color emoji ignore ANSI color → swap to a monochrome glyph when the group is grayed */}
-          {isAuto ? <Text color="gray" dimColor>↯ </Text> : <Text>⚡ </Text>}
+          {eAuto ? <Text color="gray" dimColor>↯ </Text> : <Text>⚡ </Text>}
           {EFFORTS.map(n =>
-            !isAuto && lvl === n
+            !eAuto && lvl === n
               ? <Text key={`e-${n}`} bold color={EFFORT_COLOR[n]}> [{n}] </Text>
-              : <Button key={`e-${n}`} plain onPress={() => setEffort(n)}><Text color={isAuto ? 'gray' : EFFORT_DIM[n]} dimColor={isAuto}> {n} </Text></Button>,
+              : <Button key={`e-${n}`} plain onPress={() => setEffort(n)}><Text color={eAuto ? 'gray' : EFFORT_DIM[n]} dimColor={eAuto}> {n} </Text></Button>,
           )}
           <Text dimColor> | </Text>
           {advOff ? <Text color="gray" dimColor>◉ </Text> : <Text>👁️ </Text>}
