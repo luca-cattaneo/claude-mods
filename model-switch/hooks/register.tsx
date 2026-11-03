@@ -5,9 +5,11 @@ const model = atom({ plugin: 'model-switch', key: 'model' } as const, '?')
 const effort = atom({ plugin: 'model-switch', key: 'effort' } as const, '?')
 const advisor = atom({ plugin: 'model-switch', key: 'advisor' } as const, 'off')
 const auto = atom({ plugin: 'model-switch', key: 'auto' } as const, 'off')
-// Session-only picks from the bar ('' = none → the default set by /model, /effort applies).
+// Session-only picks from the bar: '' = none (the default set by /model, /effort applies), 'auto' = auto for this session.
 const pickModel = atom({ plugin: 'model-switch', key: 'pickModel' } as const, '')
 const pickEffort = atom({ plugin: 'model-switch', key: 'pickEffort' } as const, '')
+// code simplification: the account default model is learned at session start only when no /model is saved; else the 'opus' alias
+const defaultModel = atom({ plugin: 'model-switch', key: 'defaultModel' } as const, 'opus')
 
 const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] // most → least powerful
 const ADVISORS = ['off', 'fable', 'opus', 'sonnet'] // /advisor validates; haiku as advisor makes no sense
@@ -22,6 +24,7 @@ export const register: Register = on => {
     const lvl = await $.settings.read({ key: 'effortLevel' })
     await update($, model, () => m)
     await update($, effort, () => String(lvl ?? '?'))
+    if ((await $.settings.read({ key: 'model' })) === undefined) await update($, defaultModel, () => m)
     const adv = await $.settings.read({ key: 'advisorModel' })
     await update($, advisor, () => String(adv ?? 'off'))
     // close the docked pane an earlier version opened
@@ -36,11 +39,13 @@ export const register: Register = on => {
     await update($, effort, () => (e.effort === undefined ? 'n/a' : String(e.effort)))
     const pm = await read($, pickModel)
     const pe = await read($, pickEffort)
-    return yield* next({
-      ...e,
-      ...(pm && { model: pm }),
-      ...(pe && { effort: pe as (typeof EFFORTS_T)[number] }),
-    })
+    const mdl = pm === 'auto' ? await read($, defaultModel) : pm || e.model
+    if (pe !== 'auto') return yield* next({ ...e, model: mdl, ...(pe && { effort: pe as (typeof EFFORTS_T)[number] }) })
+    // auto effort = what the engine does for /effort auto: the model's modelSettings level, else no effort (the model's own default)
+    const perModel = (await $.settings.read({ key: 'modelSettings' })) as Record<string, { effortLevel?: string }> | undefined
+    const lvl = perModel?.[mdl]?.effortLevel as (typeof EFFORTS_T)[number] | undefined // a model may have no entry
+    const { effort: _, ...rest } = e
+    return yield* next({ ...rest, model: mdl, ...(lvl && { effort: lvl }) })
   })
 
   // /model and /effort typed by hand set the default and drop the session pick (buttons no longer run them).
@@ -81,15 +86,14 @@ export const register: Register = on => {
     const lvl = pe || (await read($, effort))
     const adv = await read($, advisor)
     const autoDefault = (await read($, auto)) === 'on'
-    const mAuto = autoDefault && !pm // a group goes gray while it follows the auto default
-    const eAuto = autoDefault && !pe
+    const mAuto = pm === 'auto' || (autoDefault && !pm) // a group goes gray while it is on auto
+    const eAuto = pe === 'auto' || (autoDefault && !pe)
     const isAuto = mAuto && eAuto
     const advOff = adv === 'off' // advisor off: the whole group goes gray
 
-    // code simplification: "auto" = drop the session picks → back to the defaults; true auto only if the default is auto
     const setAuto = () => {
-      void update($, pickModel, () => '')
-      void update($, pickEffort, () => '')
+      void update($, pickModel, () => 'auto')
+      void update($, pickEffort, () => 'auto')
     }
     const setModel = (name: string) => void update($, pickModel, () => name)
     const setAdvisor = (name: string) => {
