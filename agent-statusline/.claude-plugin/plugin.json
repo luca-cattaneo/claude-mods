@@ -1,0 +1,1 @@
+{ "name": "agent-statusline", "version": "0.1.0", "description": "Status row under the prompt switch: model, context, project/git, quotas; follows the open subagent", "types": "./types/index.d.ts" }
