@@ -1,1 +1,1 @@
-{ "name": "model-switch", "version": "0.1.0", "description": "Bar above the prompt: active model + effort, one-click switch", "types": "./types/index.d.ts" }
+{ "name": "model-switch", "version": "0.1.0", "description": "Bar under the prompt: active model, effort and advisor, one-click switch", "types": "./types/index.d.ts" }
